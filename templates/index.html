@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Loan Predictor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+
+    <div class="container">
+        <header class="header">
+            <h1>AI Loan Predictor</h1>
+            <p>Enter applicant details to instantly determine eligibility</p>
+        </header>
+
+        <!-- Flash Messages Block -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">
+            {% if category == 'success' %}
+            <i class="ph-fill ph-check-circle" style="font-size: 1.5rem;"></i>
+            {% elif category == 'error' %}
+            <i class="ph-fill ph-x-circle" style="font-size: 1.5rem;"></i>
+            {% else %}
+            <i class="ph-fill ph-warning-circle" style="font-size: 1.5rem;"></i>
+            {% endif %}
+            <span>{{ message }}</span>
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <!-- Suggestions Block -->
+        {% if suggestions %}
+        <div class="suggestions-box">
+            <h3><i class="ph-fill ph-lightbulb"></i>Suggestions for Approval</h3>
+            <ul>
+                {% for suggestion in suggestions %}
+                <li><i class="ph-bold ph-check-circle"></i>{{ suggestion }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- EMI Block -->
+        {% if emi %}
+        <div class="emi-box">
+            <h3><i class="ph-fill ph-calculator"></i>Estimated Repayment</h3>
+            <p>If you proceed with a <strong>{{ user_data.loan_type }}</strong> from <strong>{{ user_data.bank_name }}</strong>, your estimated monthly EMI for a 5-year term at {{ user_data.interest_rate }}% interest would be: <strong>&#8377;{{ emi }}</strong></p>
+        </div>
+        {% endif %}
+
+        <!-- Application Insights Charts -->
+        {% if user_data %}
+        <div class="dashboard">
+            <h3><i class="ph-fill ph-chart-pie"></i>Application Insights</h3>
+            <div class="charts-container">
+                <div class="chart-wrapper">
+                    <canvas id="creditChart"></canvas>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="dtiChart"></canvas>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- What-If Analysis -->
+        {% if suggestions and user_data %}
+        <div class="what-if-box">
+            <h3><i class="ph-fill ph-sliders"></i>What-If Scenario Tester</h3>
+            <p>Adjust the sliders below to see what it would take to get approved.</p>
+            <div class="slider-group">
+                <label for="wi-credit">Credit Score: <span id="wi-credit-val">{{ user_data.credit }}</span></label>
+                <input type="range" id="wi-credit" min="300" max="850" value="{{ user_data.credit }}" oninput="updateWI('credit')">
+            </div>
+            <div class="slider-group">
+                <label for="wi-income">Income (&#8377;): <span id="wi-income-val">{{ user_data.income }}</span></label>
+                <input type="range" id="wi-income" min="0" max="{{ [user_data.income * 2, 500000] | max }}" step="5000" value="{{ user_data.income }}" oninput="updateWI('income')">
+            </div>
+            <div class="slider-group">
+                <label for="wi-loan">Loan Amount (&#8377;): <span id="wi-loan-val">{{ user_data.loan }}</span></label>
+                <input type="range" id="wi-loan" min="1000" max="{{ [user_data.loan * 2, 1000000] | max }}" step="10000" value="{{ user_data.loan }}" oninput="updateWI('loan')">
+            </div>
+            <button type="button" class="test-btn" onclick="testScenario()">Test Scenario</button>
+            <div id="wi-result" class="wi-result" style="display:none;"></div>
+        </div>
+        {% endif %}
+
+        <form action="/" method="POST" id="loanForm" onsubmit="return validateForm()">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="age">Applicant Age</label>
+                    <input type="number" id="age" name="age" min="18" max="100" placeholder="e.g. 35" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="income">Annual Income (&#8377;)</label>
+                    <input type="number" id="income" name="income" min="0" placeholder="e.g. 65000" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="loan">Loan Amount (&#8377;)</label>
+                    <input type="number" id="loan" name="loan" min="1000" placeholder="e.g. 250000" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="bank_name">Select Bank</label>
+                    <select id="bank_name" name="bank_name" class="custom-select" required onchange="updateInterestRate()">
+                        {% if banks %}
+                            {% for bank in banks.keys() %}
+                                <option value="{{ bank }}">{{ bank }}</option>
+                            {% endfor %}
+                        {% else %}
+                            <option value="SBI (State Bank of India)">SBI (State Bank of India)</option>
+                        {% endif %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="loan_type">Loan Type</label>
+                    <select id="loan_type" name="loan_type" class="custom-select" required onchange="updateInterestRate()">
+                        <option value="Personal Loan">Personal Loan</option>
+                        <option value="Home Loan">Home Loan</option>
+                        <option value="Education Loan">Education Loan</option>
+                        <option value="Business Loan">Business Loan</option>
+                        <option value="Vehicle Loan">Vehicle Loan</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="interest_rate">Interest Rate (%)</label>
+                    <input type="number" id="interest_rate" name="interest_rate" min="1" max="30" step="0.1" placeholder="e.g. 8.5" value="8.0" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="credit">Credit Score</label>
+                    <input type="number" id="credit" name="credit" min="300" max="850" placeholder="e.g. 720" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="years">Employment Years</label>
+                    <input type="number" id="years" name="years" min="0" max="60" placeholder="e.g. 5" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="dependents">Dependents</label>
+                    <input type="number" id="dependents" name="dependents" min="0" max="15" placeholder="e.g. 2" required>
+                </div>
+            </div>
+
+            <button type="submit" class="submit-btn" id="submitBtn">
+                <i class="ph ph-magic-wand" style="vertical-align: middle; margin-right: 8px; font-size: 1.2rem;"></i>
+                Analyze Eligibility
+            </button>
+        </form>
+    </div>
+
+    <script>
+        function validateForm() {
+            const btn = document.getElementById('submitBtn');
+            btn.innerHTML = '<i class="ph ph-spinner ph-spin" style="vertical-align: middle; margin-right: 8px; font-size: 1.2rem;"></i> Processing...';
+            btn.style.opacity = '0.7';
+            btn.style.cursor = 'not-allowed';
+            return true;
+        }
+
+        document.querySelectorAll('.form-group input, .form-group select').forEach((el, i) => {
+            el.style.animation = `fadeUp 0.6s ease-out ${i * 0.08}s both`;
+        });
+
+        // ── Bank / Interest Rate auto-fill ──────────────────────────
+        let bankData = {};
+        const _bankRaw = '{{ banks | tojson | safe if banks else "{}" }}';
+        try { bankData = JSON.parse(_bankRaw); } catch(e) { console.warn('bankData:', e); }
+
+        function updateInterestRate() {
+            const bankEl = document.getElementById('bank_name');
+            const loanEl = document.getElementById('loan_type');
+            const rateEl = document.getElementById('interest_rate');
+            if (!bankEl || !loanEl || !rateEl) return;
+            const rate = (bankData[bankEl.value] || {})[loanEl.value];
+            if (rate !== undefined) {
+                rateEl.value = rate;
+                rateEl.style.animation = 'none';
+                void rateEl.offsetHeight;
+                rateEl.style.animation = 'fadeUp 0.3s ease-out';
+            }
+        }
+        document.addEventListener('DOMContentLoaded', updateInterestRate);
+
+        {% if user_data %}
+        // ── Inject user data ────────────────────────────────────────
+        const _udRaw = '{{ user_data | tojson | safe }}';
+        let userData = {};
+        try { userData = JSON.parse(_udRaw); } catch(e) { console.error('userData:', e); }
+
+        // ── Credit Score doughnut chart ─────────────────────────────
+        (function() {
+            const el = document.getElementById('creditChart');
+            if (!el) return;
+            new Chart(el, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Your Score', 'Remaining'],
+                    datasets: [{
+                        data: [Number(userData.credit) || 0, 850 - (Number(userData.credit) || 0)],
+                        backgroundColor: ['#4F46E5', '#1E293B'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    rotation: -90,
+                    circumference: 180,
+                    plugins: {
+                        title:  { display: true, text: 'Credit Score', color: '#F8FAFC' },
+                        legend: { display: false }
+                    }
+                }
+            });
+        })();
+
+        // ── Income vs Loan pie chart ────────────────────────────────
+        (function() {
+            const el = document.getElementById('dtiChart');
+            if (!el) return;
+            new Chart(el, {
+                type: 'pie',
+                data: {
+                    labels: ['Income', 'Loan Requested'],
+                    datasets: [{
+                        data: [Number(userData.income) || 0, Number(userData.loan) || 0],
+                        backgroundColor: ['#10B981', '#EF4444'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    plugins: {
+                        title:  { display: true, text: 'Income vs Loan', color: '#F8FAFC' },
+                        legend: { labels: { color: '#F8FAFC' } }
+                    }
+                }
+            });
+        })();
+
+        // ── What-If slider logic ────────────────────────────────────
+        function updateWI(field) {
+            const el = document.getElementById('wi-' + field);
+            if (el) document.getElementById('wi-' + field + '-val').innerText =
+                Number(el.value).toLocaleString('en-IN');
+        }
+
+        async function testScenario() {
+            const btn = document.querySelector('.test-btn');
+            btn.innerText = 'Testing...';
+            btn.style.opacity = '0.7';
+            const payload = {
+                age:        Number(userData.age),
+                income:     Number(document.getElementById('wi-income').value),
+                loan:       Number(document.getElementById('wi-loan').value),
+                credit:     Number(document.getElementById('wi-credit').value),
+                years:      Number(userData.years),
+                dependents: Number(userData.dependents)
+            };
+            try {
+                const res  = await fetch('/api/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                const resDiv = document.getElementById('wi-result');
+                resDiv.style.display = 'block';
+                if (data.status === 'APPROVED') {
+                    resDiv.className = 'wi-result success';
+                    resDiv.innerHTML = '<i class="ph-fill ph-check-circle" style="vertical-align:middle;margin-right:5px;"></i> Approved! (Confidence: ' + (data.probability ?? '--') + '%)';
+                } else {
+                    resDiv.className = 'wi-result error';
+                    resDiv.innerHTML = '<i class="ph-fill ph-x-circle" style="vertical-align:middle;margin-right:5px;"></i> Not Approved (Confidence: ' + (data.probability ?? '--') + '%)';
+                }
+            } catch (err) { console.error(err); }
+            btn.innerText = 'Test Scenario';
+            btn.style.opacity = '1';
+        }
+
+        // Initialise slider display values on page load
+        ['credit', 'income', 'loan'].forEach(function(f) {
+            var el = document.getElementById('wi-' + f);
+            if (el) document.getElementById('wi-' + f + '-val').innerText =
+                Number(el.value).toLocaleString('en-IN');
+        });
+
+        {% endif %}
+    </script>
+</body>
+
+</html>
